@@ -70,7 +70,7 @@ rule rsids_for_prs:
         ln -s $HOME/logs/smk_rfp_$SLURM_JOB_ID.err {log}.$SLURM_JOB_ID.err | true
 
         mkdir -p {params.out_path}/subsets_pgs/ | true
-        python -m umbrella.pre.gwas.scripts.rsids_for_prs --in_pgs_file {input.pgs} --in_pvar_extended_ids {input.pvar_ex} --out {params.out_path} --nvar {params.nfeatures} > {log}
+        python -m scripts.rsids_for_prs --in_pgs_file {input.pgs} --in_pvar_extended_ids {input.pvar_ex} --out {params.out_path} --nvar {params.nfeatures} > {log}
         """
 
 
@@ -117,7 +117,7 @@ rule adjust_annotated_file:
     shell:
         """
         2>{log}
-        python -m umbrella.pre.gwas.scripts.adjust_annotated_file --input {input} --output {output}
+        python -m scripts.adjust_annotated_file --input {input} --output {output}
         """
 
 
@@ -137,7 +137,7 @@ rule extract_chr_specific_rsids:
     shell:
         """
         2>{log}
-        python -m umbrella.pre.gwas.scripts.extract_rsids --df {input} --outID {output.ID} --outaltID {output.altID}
+        python -m scripts.extract_rsids --df {input} --outID {output.ID} --outaltID {output.altID}
         """
 
 
@@ -235,7 +235,7 @@ rule write_split_npy:
         ln -s $HOME/logs/smk_npy_$SLURM_JOB_ID.out {log}.$SLURM_JOB_ID.out | true
         ln -s $HOME/logs/smk_npy_$SLURM_JOB_ID.err {log}.$SLURM_JOB_ID.err | true
 
-        python -m umbrella.pre.gwas.scripts.to_npy_split  \
+        python -m scripts.to_npy_split  \
         --i_raw {params.out_path}/plink/plink_temp_chr_{{}}.{wildcards.nfeatures}.raw \
         --i_var {input.var} \
         --pickpath {input.pick_list} \
@@ -261,148 +261,8 @@ rule require_nfeatures:
 #                                                    Evaluation rules                                                   #
 #########################################################################################################################
 
-rule eval_mlp:
-    input:
-        expand("{out_path}/splits/all_chrs_{split}.{dsname}-{nfeatures}.X.npy", allow_missing=True, out_path=str(config["out"]), split=['all'], nfeatures=str(config["nfeatures"]), dsname=str(config["dsname"]))
-    output:
-        expand('{out_path}/models/mlp/ukb_all_scores_extended.tsv', out_path=str(config["out"]))
-    params:
-        out_path = str(config["out"]),
-        ds_name = str(config["dsname"]),
-        nfeatures = str(config["nfeatures"]),
-        config_name = str(config["train_config_name"]),
-        pheno_path = str(config["pheno_path"]),
-        pheno_name = str(config["pheno_name"]) 
-    resources:
-        mem_mb=100_000, # MB
-        runtime=2880, # 48 hours
-        slurm_extra= '-o $HOME/logs/smk_trmlp_%j.out -e $HOME/logs/smk_trmlp_%j.out --gres=gpu:1 -p gpu'
-    conda:
-        str(config["conda_env"])
-    shell:
-        """
-        ln -s $HOME/logs/smk_trmlp_$SLURM_JOB_ID.out {log}.$SLURM_JOB_ID.out | true
-        ln -s $HOME/logs/smk_trmlp_$SLURM_JOB_ID.err {log}.$SLURM_JOB_ID.err | true
-
-        mkdir -p {params.out_path}/models/mlp/
-
-        python -m umbrella.core.genopheno.train \
-        --config-name={params.config_name} \
-        logging.cloud_logger.tags=[mlp,{params.ds_name},{params.config_name},{params.pheno_name}] \
-        lightning_module.model_type=FCN \
-        datamodule.plugins.geno.dataset_path={params.out_path}/splits/ \
-        datamodule.plugins.geno.src=all_chrs_all.{params.ds_name}-{params.nfeatures} \
-        datamodule.plugins.geno.src_names=[all] \
-        datamodule.plugins.labels.data_paths={params.pheno_path} \
-        logging.out_directory={params.out_path}/models/mlp/
-
-        ln -s {params.out_path}/models/mlp/*/results/ukb_all_scores_extended.tsv {params.out_path}/models/mlp/ukb_all_scores_extended.tsv
-        # trainer_config.accelerator=cpu
-        """
 
 
-rule eval_logreg:
-    input:
-        expand("{out_path}/splits/all_chrs_{split}.{dsname}-{nfeatures}.X.npy", allow_missing=True, out_path=str(config["out"]), split=['all'], nfeatures=str(config["nfeatures"]), dsname=str(config["dsname"])),
-    output:
-        expand('{out_path}/models/logreg/ukb_all_scores_extended.tsv', out_path=str(config["out"]))
-    params:
-        out_path = str(config["out"]),
-        ds_name = str(config["dsname"]),
-        nfeatures = str(config["nfeatures"]),
-        config_name = str(config["train_config_name"]),
-        pheno_path = str(config["pheno_path"]),
-        pheno_name = str(config["pheno_name"]) 
-    resources:
-        mem_mb=100_000, # MB
-        runtime=2880, # 48 hours
-        slurm_extra= '-o $HOME/logs/smk_trlr_%j.out -e $HOME/logs/smk_trlr_%j.out' # --gres=gpu:1 -p gpu'
-    conda:
-        str(config["conda_env"])
-    shell:
-        """
-        ln -s $HOME/logs/smk_trlr_$SLURM_JOB_ID.out {log}.$SLURM_JOB_ID.out | true
-        ln -s $HOME/logs/smk_trlr_$SLURM_JOB_ID.err {log}.$SLURM_JOB_ID.err | true
-
-        mkdir -p {params.out_path}/models/logreg/
-
-        if [ -n "$(find {params.out_path}/models/logreg/ -type d -name 'OGM*' -print -quit)" ]; then
-            for file in {params.out_path}/models/logreg/OGM* ; do mv "$file" "${{file/OGM/_OGM}}" ; done
-        fi
-
-        python -m umbrella.core.genopheno.train \
-        --config-name={params.config_name} \
-        logging.cloud_logger.tags=[logreg,{params.ds_name},{params.config_name},{params.pheno_name}] \
-        lightning_module.model_type=Logistic \
-        lightning_module.model_config.n_latent=1 \
-        lightning_module.head_config.specific_config.genes.decoder_type=IdentityDecoder \
-        trainer_config.max_epochs=10 \
-        callback_config.early_stopping=True \
-        lightning_module.head_config.specific_config.genes.genes_detach=False \
-        ++lightning_module.head_config.specific_config.cov_essential.genes_detach=True \
-        ++lightning_module.head_config.specific_config.cov_essential_and_genes.genes_detach=True \
-        ++lightning_module.head_config.specific_config.cov_essential.decoder_type=LogisticDecoder \
-        ++lightning_module.head_config.specific_config.cov_essential_and_genes.decoder_type=LogisticDecoder \
-        ++lightning_module.head_config.specific_config.covariates_only.decoder_type=LogisticDecoder \
-        datamodule.plugins.geno.dataset_path={params.out_path}/splits/ \
-        datamodule.plugins.geno.src=[all_chrs_all.{params.ds_name}-{params.nfeatures}] \
-        datamodule.plugins.geno.src_names=[all] \
-        ++trainer_config.accelerator=cpu \
-        logging.out_directory={params.out_path}/models/logreg/ \
-        datamodule.plugins.labels.data_paths={params.pheno_path}  
-
-
-
-        ln -s $(pwd)/{params.out_path}/models/logreg/OGM*/results/ukb_all_scores_extended.tsv {params.out_path}/models/logreg/ukb_all_scores_extended.tsv | true
-        # trainer_config.accelerator=cpu \
-        """
-
-
-rule eval_ogm:
-    input:
-        expand("{out_path}/splits/all_chrs_all.{dsname}-{nfeatures}.X.npy", allow_missing=True, 
-        out_path=str(config["out"]), nfeatures=str(config["nfeatures"]), dsname=str(config["dsname"])),
-    output:
-        expand('{out_path}/models/ogm/{dsname}-{nfeatures}_ogm_scores_extended.tsv', 
-        out_path=str(config["out"]), nfeatures=str(config["nfeatures"]), dsname=str(config["dsname"])),
-    params:
-        ds_name = str(config["dsname"]),
-        out_path = str(config["out"]),
-        config_name = str(config["train_config_name"]),
-        pheno_path = str(config["pheno_path"]),
-        nfeatures = str(config["nfeatures"]),
-        pheno_name = str(config["pheno_name"]) 
-        
-    resources:
-        mem_mb=100000, # MB
-        runtime=2880, # 48 hours
-        slurm_extra= '-o $HOME/logs/smk_trogm_%j.out -e $HOME/logs/smk_trogm_%j.out --gres=gpu:1 -p gpu'
-    conda:
-        str(config["conda_env"])
-    log:
-        expand("{out_path}/logs/eval_ogm.{dsname}-{nfeatures}.log",allow_missing=True,
-        out_path=str(config["out"]), nfeatures=str(config["nfeatures"]), dsname=str(config["dsname"])),
-    shell:
-        """
- 
-        ln -s $HOME/logs/smk_trmlp_$SLURM_JOB_ID.out {log}.$SLURM_JOB_ID.out | true
-        ln -s $HOME/logs/smk_trmlp_$SLURM_JOB_ID.err {log}.$SLURM_JOB_ID.err | true
-
-        mkdir -p {params.out_path}/models/ogm/
-
-        python -m umbrella.core.genopheno.train \
-        --config-name={params.config_name} \
-        logging.cloud_logger.tags=[OGM,{params.ds_name},{params.config_name},{params.pheno_name}] \
-        datamodule.plugins.geno.dataset_path={params.out_path}/splits/ \
-        datamodule.plugins.geno.src=[all_chrs_all.{params.ds_name}-{params.nfeatures}] \
-        datamodule.plugins.labels.data_paths={params.pheno_path} \
-        datamodule.plugins.geno.src_names=[all] \
-        logging.out_directory={params.out_path}/models/ogm/ 
-
-        ln -s {params.out_path}/models/ogm/*/results/ukb_all_scores_extended.tsv {params.out_path}/models/ogm/ukb_all_scores_extended.tsv
-        # trainer_config.accelerator=cpu
-        
-        """
 
 rule calculate_pca_for_train_split:
     input:
@@ -422,5 +282,5 @@ rule calculate_pca_for_train_split:
         runtime=480 
     shell:
         """
-        python -m umbrella.pre.gwas.scripts.pca {params.out_path}/splits/all_chrs_{params.split}.{params.ds_name} {params.nfeatures}
+        python -m scripts.pca {params.out_path}/splits/all_chrs_{params.split}.{params.ds_name} {params.nfeatures}
         """

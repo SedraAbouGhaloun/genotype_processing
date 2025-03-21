@@ -27,7 +27,6 @@ def process_ld_data(path:str)-> List:
     return ld
 
 
-
 def vars_in_ld_to(var, chromosome, ld):
     chr_ld = ld[chromosome - 1]
     chr_ld_df = chr_ld[(chr_ld['SNP_A'] == var) | (chr_ld['SNP_B'] == var)]
@@ -35,7 +34,6 @@ def vars_in_ld_to(var, chromosome, ld):
     LDs_set.update(set(chr_ld_df.SNP_A))
 
     return LDs_set
-
 
 
 def get_correlated_variants(ld, variants, max_vars:int=100_000):
